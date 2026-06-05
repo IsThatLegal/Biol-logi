@@ -20,6 +20,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const sentinel_mod = b.addModule("sentinel", .{
+        .root_source_file = b.path("src/sentinel.zig"),
+        .target = target,
+    });
+
     // Create the main executable with all bio modules available
     const exe = b.addExecutable(.{
         .name = "biol-logi",
@@ -31,6 +36,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "protein_core", .module = protein_core_mod },
                 .{ .name = "orchestrator", .module = orchestrator_mod },
                 .{ .name = "reward_learning", .module = reward_learning_mod },
+                .{ .name = "sentinel", .module = sentinel_mod },
             },
         }),
     });

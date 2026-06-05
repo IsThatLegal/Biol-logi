@@ -1,35 +1,12 @@
 const std = @import("std");
 const Io = std.Io;
+const sentinel = @import("sentinel");
 
-const protein_core = @import("protein_core");
-
-/// Wrap protein_core demo as a reusable function
-pub fn runProteinCoreDemo(allocator: std.mem.Allocator, io: Io, stdout: anytype) !void {
-    try stdout.print("\n▶ DEMO 1: PROTEIN CORE (Sensorimotor Reflex)\n", .{});
-    try stdout.print("   A simple pressure sensor → neural wave → motor action\n", .{});
-    try stdout.print("   ─────────────────────────────────────────────────────\n\n", .{});
-
-    var sim = try protein_core.MatrixSimulator.init(allocator, 50, io);
-    defer sim.deinit();
-
-    try sim.addSensor(0, .Pressure);
-    try sim.addActor(10, .MotorPulse, 60);
-
-    try stdout.print("   Pressure sensor injecting signal at node 0...\n", .{});
-    try stdout.print("   Watching for reaction at node 10...\n\n", .{});
-
-    var tick: usize = 0;
-    while (tick < 30) : (tick += 1) {
-        try sim.tick(tick, stdout);
-        if (tick % 5 == 0) {
-            try sim.visualizeWindow(stdout, tick, 0, 20);
-        }
-    }
-    try stdout.flush();
-
-    try stdout.print("\n   [Demo 1 Complete]\n", .{});
-    try stdout.print("   Proteins successfully propagated and triggered motor action.\n\n", .{});
-}
+const CONFIG = struct {
+    pub const WIDTH: usize = 30;
+    pub const HEIGHT: usize = 12;
+    pub const TICK_LIMIT: usize = 300;
+};
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -40,49 +17,77 @@ pub fn main(init: std.process.Init) !void {
     const stdout = &stdout_file_writer.interface;
     defer stdout.flush() catch {};
 
-    try stdout.print("\n", .{});
-    try stdout.print("╔══════════════════════════════════════════════════════════════╗\n", .{});
-    try stdout.print("║         BIO-LOGI: Biological Logic Simulation Engine         ║\n", .{});
-    try stdout.print("║  Silicon Proteins, Reward Learning, Sensorimotor Integration  ║\n", .{});
-    try stdout.print("╚══════════════════════════════════════════════════════════════╝\n", .{});
-    try stdout.print("\n", .{});
+    const count = CONFIG.WIDTH * CONFIG.HEIGHT;
+    const matrix = try allocator.alloc(sentinel.SentinelProtein, count);
+    const next_gen = try allocator.alloc(sentinel.SentinelProtein, count);
+    defer allocator.free(matrix);
+    defer allocator.free(next_gen);
 
-    try stdout.print("Available Demos:\n", .{});
-    try stdout.print("  1. Protein Core - Reflex Arc (Sensing → Processing → Action)\n", .{});
-    try stdout.print("  2. Orchestrator - Spatial Wave Propagation with Latency\n", .{});
-    try stdout.print("  3. Reward Learning - Digital Dopamine-Based Pathfinding\n", .{});
-    try stdout.print("\nRunning all demos in sequence...\n\n", .{});
+    // Initialize
+    for (matrix, 0..) |*p, i| {
+        p.* = .{ 
+            .id = @as(u32, @intCast(i)), .s_vision = 0, .s_hearing = 0, .s_touch = 0, 
+            .s_smell = 0, .s_taste = 0, .s_rf = 0, .resonance = 0, .last_peak = 0, 
+            .energy = 255, .role = 0, .threshold = 30, .is_echoing = false, .padding = 0 
+        };
+    }
 
-    // --- DEMO 1: Protein Core ---
-    try runProteinCoreDemo(allocator, io, stdout);
+    try stdout.print("\x1B[2J", .{}); 
 
-    // --- DEMO 2: Orchestrator ---
-    try stdout.print("\n▶ DEMO 2: ORCHESTRATOR (Recipe-Driven Network)\n", .{});
-    try stdout.print("   Programs the network via spatial recipes with wire latency\n", .{});
-    try stdout.print("   ─────────────────────────────────────────────────────\n\n", .{});
+    var t: usize = 0;
+    while (t < CONFIG.TICK_LIMIT) : (t += 1) {
+        try stdout.print("\x1B[H", .{}); 
+        
+        try stdout.print("╔══════════════════════════════════════════════════════════════╗\n", .{});
+        try stdout.print("║         BIO-LOGI: SENTINEL CORE LIVE DASHBOARD               ║\n", .{});
+        try stdout.print("║  Multi-Modal Fusion • Metabolic Logic • High Fidelity Proof  ║\n", .{});
+        try stdout.print("╚══════════════════════════════════════════════════════════════╝\n", .{});
+        
+        // 1. STIMULUS
+        const fx = @as(f32, @floatFromInt(t)) * 0.1;
+        const lx = @as(usize, @intFromFloat(@as(f32, @floatFromInt(CONFIG.WIDTH / 2)) + std.math.cos(fx) * 12.0));
+        const ly = @as(usize, @intFromFloat(@as(f32, @floatFromInt(CONFIG.HEIGHT / 2)) + std.math.sin(fx) * 4.0));
+        matrix[ly * CONFIG.WIDTH + lx].s_vision = 255;
+        matrix[ly * CONFIG.WIDTH + lx].s_smell = 250;
+        if (t % 5 == 0) matrix[ly * CONFIG.WIDTH + lx].s_rf = 255;
 
-    try stdout.print("   Building 20x15 grid with source, sensor, and motor actor...\n", .{});
-    try stdout.print("   Signals travel with cycle-accurate routing delay.\n\n", .{});
+        // 2. LOGIC
+        for (matrix, 0..) |p, i| next_gen[i] = p;
+        for (matrix) |p| p.tick(next_gen, t);
+        for (matrix, 0..) |*p, i| p.* = next_gen[i];
 
-    try stdout.print("   [Orchestrator module would run here]\n", .{});
-    try stdout.print("   [Orchestrator has its own main() - integrate via wrapper]\n\n", .{});
+        // 3. DRAW PERCEPTION FIELD
+        var y: usize = 0;
+        while (y < CONFIG.HEIGHT) : (y += 1) {
+            try stdout.print("  ", .{});
+            var x: usize = 0;
+            while (x < CONFIG.WIDTH) : (x += 1) {
+                const p = matrix[y * CONFIG.WIDTH + x];
+                const char: u8 = if (p.resonance > 100) '!' 
+                               else if (p.s_rf > 100) 'R' 
+                               else if (p.s_vision > 150) 'V'
+                               else if (p.s_smell > 100) 's'
+                               else ' '; // Use space instead of · for clearer view
+                
+                if (char == '!') {
+                    try stdout.print("\x1B[1;32m{c}\x1B[0m ", .{char});
+                } else if (char == 'R') {
+                    try stdout.print("\x1B[1;31m{c}\x1B[0m ", .{char});
+                } else if (char == 'V') {
+                    try stdout.print("\x1B[1;37m{c}\x1B[0m ", .{char});
+                } else if (char == 's') {
+                    try stdout.print("\x1B[34m{c}\x1B[0m ", .{char});
+                } else {
+                    try stdout.print("{c} ", .{char});
+                }
+            }
+            try stdout.print("\n", .{});
+        }
 
-    // --- DEMO 3: Reward Learning ---
-    try stdout.print("\n▶ DEMO 3: REWARD LEARNING (Dopamine-Based Pathfinding)\n", .{});
-    try stdout.print("   Robot learns optimal paths via reinforcement & eligibility traces\n", .{});
-    try stdout.print("   ─────────────────────────────────────────────────────\n\n", .{});
-
-    try stdout.print("   [Reward Learning module would run here]\n", .{});
-    try stdout.print("   [Reward Learning has its own main() - integrate via wrapper]\n\n", .{});
-
-    // Summary
-    try stdout.print("╔══════════════════════════════════════════════════════════════╗\n", .{});
-    try stdout.print("║                    SIMULATION COMPLETE                        ║\n", .{});
-    try stdout.print("║                                                              ║\n", .{});
-    try stdout.print("║  ✓ Protein Core: Sensorimotor reflexes working               ║\n", .{});
-    try stdout.print("║  ✓ Orchestrator: Spatial routing with latency stable         ║\n", .{});
-    try stdout.print("║  ✓ Reward Learning: Dopamine-based path optimization         ║\n", .{});
-    try stdout.print("║                                                              ║\n", .{});
-    try stdout.print("║  Next: Integrate all modules into a unified bio-agent.       ║\n", .{});
-    try stdout.print("╚══════════════════════════════════════════════════════════════╝\n\n", .{});
+        try stdout.print("\n  [V]:Vision [s]:Smell [R]:RF/Heartbeat [!]:FUSED TARGET\n", .{});
+        try stdout.print("  Tick: {d: >4} | Mode: MULTI-MODAL SYNTHESIS\n", .{t});
+        
+        try stdout.flush();
+        try Io.sleep(io, .{ .nanoseconds = 40 * std.time.ns_per_ms }, .awake);
+    }
 }

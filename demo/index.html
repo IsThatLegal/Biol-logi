@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bio-Logi: Silicon Protein Interactive Neuromorphic Demo</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div class="glow-orb" id="orb-1"></div>
+    <div class="glow-orb" id="orb-2"></div>
+
+    <header class="app-header">
+        <div class="header-logo">
+            <span class="logo-icon">🧬</span>
+            <div class="logo-text">
+                <h1>BIO-LOGI</h1>
+                <p>Silicon Protein Metabolic logic Matrix</p>
+            </div>
+        </div>
+        <div class="header-badge">
+            <span class="pulse-indicator"></span>
+            <span>FPGA-Ready HW Emulation Active</span>
+        </div>
+    </header>
+
+    <main class="app-container">
+        <!-- Sidebar controls -->
+        <aside class="controls-panel card">
+            <div class="panel-section">
+                <h2>1. Select Simulation Mode</h2>
+                <div class="mode-selectors">
+                    <button class="mode-btn active" id="btn-sentinel" data-mode="sentinel">
+                        <span class="mode-icon">👁️</span>
+                        <div class="mode-info">
+                            <h3>Sentinel Sensory Fusion</h3>
+                            <p>Multi-modal target locking</p>
+                        </div>
+                    </button>
+                    <button class="mode-btn" id="btn-sonar" data-mode="sonar">
+                        <span class="mode-icon">🦇</span>
+                        <div class="mode-info">
+                            <h3>Decentralized Sonar</h3>
+                            <p>Echolocation & reflecting echoes</p>
+                        </div>
+                    </button>
+                    <button class="mode-btn" id="btn-learning" data-mode="learning">
+                        <span class="mode-icon">🧠</span>
+                        <div class="mode-info">
+                            <h3>Hebbian STDP Plasticity</h3>
+                            <p>Synaptic timing weight-tuning</p>
+                        </div>
+                    </button>
+                    <button class="mode-btn" id="btn-axi" data-mode="axi">
+                        <span class="mode-icon">⚡</span>
+                        <div class="mode-info">
+                            <h3>AXI Highway Latency</h3>
+                            <p>O(1) axon vs O(N) local hops</p>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>2. Simulation Parameters</h2>
+                <div class="sliders-group">
+                    <div class="slider-wrapper">
+                        <label for="slider-decay">
+                            <span>Metabolic Decay Rate</span>
+                            <span class="slider-val" id="val-decay">140</span>
+                        </label>
+                        <input type="range" id="slider-decay" min="20" max="220" value="140" step="5">
+                    </div>
+                    <div class="slider-wrapper">
+                        <label for="slider-refractory">
+                            <span>Refractory Period (Ticks)</span>
+                            <span class="slider-val" id="val-refractory">3</span>
+                        </label>
+                        <input type="range" id="slider-refractory" min="1" max="6" value="3" step="1">
+                    </div>
+                    <div class="slider-wrapper">
+                        <label for="slider-dopamine">
+                            <span>Global Dopamine Modulation</span>
+                            <span class="slider-val" id="val-dopamine">1.0x</span>
+                        </label>
+                        <input type="range" id="slider-dopamine" min="0.5" max="2.0" value="1.0" step="0.1">
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>3. Inject Disturbances</h2>
+                <div class="btn-group">
+                    <button class="btn btn-danger" id="btn-flashbang">
+                        💥 Trigger Flashbang (100% Noise)
+                    </button>
+                    <button class="btn btn-secondary" id="btn-clear">
+                        🧹 Clear Grid
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <section class="workspace">
+            <!-- Canvas Simulation container -->
+            <div class="canvas-container card">
+                <div class="canvas-header">
+                    <div class="canvas-title">
+                        <span class="mode-badge" id="current-mode-badge">SENTINEL FUSION</span>
+                        <span class="canvas-hint">Click or Drag on Grid to stimulate cells</span>
+                    </div>
+                    <div class="grid-legend" id="legend-container">
+                        <!-- Legend items injected dynamically -->
+                    </div>
+                </div>
+                <div class="canvas-wrapper">
+                    <canvas id="sim-canvas"></canvas>
+                </div>
+                <div class="canvas-footer">
+                    <div class="status-indicator">
+                        <span>Grid Size: 40 × 20 (800 Proteins)</span>
+                    </div>
+                    <div class="status-indicator">
+                        <span>Cell Resolution: 256-bit packed aligned</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Diagnostics & Benchmarks panel -->
+            <div class="metrics-grid">
+                <div class="metric-card card">
+                    <div class="metric-header">
+                        <h3>System Energy State</h3>
+                        <span class="metric-icon">🔋</span>
+                    </div>
+                    <div class="energy-bar-container">
+                        <div class="energy-bar" id="energy-progress" style="width: 100%"></div>
+                    </div>
+                    <div class="metric-details">
+                        <span id="energy-value">100% (Fully Repolarized)</span>
+                    </div>
+                </div>
+
+                <div class="metric-card card">
+                    <div class="metric-header">
+                        <h3>Network Status</h3>
+                        <span class="metric-icon">🛡️</span>
+                    </div>
+                    <div class="status-display" id="network-state-text">NORMAL STATE</div>
+                    <div class="metric-details">
+                        <span id="network-subtext">Resilient automatic gain control</span>
+                    </div>
+                </div>
+
+                <div class="metric-card card" id="latency-metric-card">
+                    <div class="metric-header">
+                        <h3>AXI Bypass Latency</h3>
+                        <span class="metric-icon">⏱️</span>
+                    </div>
+                    <div class="latency-comparison">
+                        <div class="latency-bar-row">
+                            <span>Local Hops:</span>
+                            <div class="latency-track">
+                                <div class="latency-fill local" id="latency-local-fill" style="width: 100%"></div>
+                            </div>
+                            <span class="latency-val-text" id="latency-local-text">17 cyc</span>
+                        </div>
+                        <div class="latency-bar-row">
+                            <span>AXI Axon:</span>
+                            <div class="latency-track">
+                                <div class="latency-fill AXI" id="latency-axi-fill" style="width: 6%"></div>
+                            </div>
+                            <span class="latency-val-text" id="latency-axi-text">1 cyc</span>
+                        </div>
+                    </div>
+                    <div class="latency-saving" id="latency-saving-text">
+                        94.1% Latency Reduction Verified
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <p>Biol-Logi Silicon Ready Architecture Demonstration © 2026. Made with Zig & WebGL.</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -63,6 +63,22 @@ This repository contains interactive terminal dashboards representing different 
 
 ---
 
+## 🌐 Interactive Web Demo
+
+For a rich, visual, interactive demonstration of the neuromorphic cellular automata architecture, run the built-in demo server:
+
+```bash
+# Start the demo server from the project directory
+python3 -m http.server --directory demo 8080
+```
+Open **[http://localhost:8080](http://localhost:8080)** in your browser to interact with:
+* **Sentinel Sensory Fusion:** Watch multi-modal sensory ripples and locks onto target anomalies.
+* **Decentralized Sonar:** Place custom obstacles and measure return echo distance.
+* **Hebbian Plasticity (STDP):** Click cells to stimulate them and watch connections strengthen (LTP) or weaken (LTD) based on spike timing.
+* **AXI Latency Highway:** View live comparison of direct 1-cycle routing vs 17-cycle local hop propagation.
+
+---
+
 ## 🔋 Core Architecture Concepts
 
 * **Metabolic Constraint (`energy`):** Firing drains local cell energy; cells recover over time. This naturally prevents runaway positive feedback loops.

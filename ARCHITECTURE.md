@@ -7,9 +7,9 @@ To create a decentralized, bio-inspired nervous system for robotics that is "Sil
 Unlike standard Neural Networks or Cellular Automata, the **Silicon Protein** architecture introduces **Metabolic Constraint** as a primary driver of logic.
 
 1. **Metabolic Awareness:** Every node (Protein) has an `energy` state. High-frequency firing depletes energy, requiring "recovery" ticks. This prevents runaway feedback loops (Stability).
-2. **Bit-Perfect Silicon Mapping:** Data structures are `packed structs` aligned to 128-bit or 64-bit boundaries, mapping directly to FPGA Block RAM (BRAM).
-3. **Saturating Bio-Logic:** All arithmetic is saturating (`+|`, `-|`) to ensure behavioral stability under extreme sensor stimulus.
-4. **Decentralized Convergence:** Global "Flow State" is achieved solely through local neighborhood interactions (North, South, East, West).
+2. **Nervous System Resilience:** Proven via "Flashbang Stress Tests." The system enters a safe "Paralytic State" under 100% sensory noise, preventing computational explosion, and recovers fully once the stimulus subsides.
+3. **Bit-Perfect Silicon Mapping:** Data structures are `packed structs` (128-bit/256-bit) aligned to FPGA Block RAM (BRAM).
+4. **Cooperative Resonance:** Signal extraction is achieved through neighbor-to-neighbor confidence spreading, allowing lock-on to life-signs in extreme noise environments.
 
 ## Patentable Pillars
 - **Energy-Constrained Decentralized Logic:** Using metabolism to govern signal propagation.

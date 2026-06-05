@@ -3,8 +3,8 @@ const Io = std.Io;
 
 // --- Constants & Config ---
 const CONFIG = struct {
-    pub const NODE_COUNT: usize = 40;
-    pub const TICK_LIMIT: usize = 60;
+    pub const NODE_COUNT: usize = 1000;
+    pub const TICK_LIMIT: usize = 100;
     pub const PROTEIN_SIZE_BYTES: usize = 16;
     pub const DECAY_RATE: u8 = 2;
     pub const TRANSFER_LOSS: u8 = 10;
@@ -96,12 +96,44 @@ pub const MockSensor = struct {
     }
 };
 
+// --- Actor Definitions ---
+pub const ActorKind = enum {
+    MotorPulse,
+    BalanceCorrection,
+    AlertSignal,
+};
+
+pub const MockActor = struct {
+    protein_id: u32,
+    kind: ActorKind,
+    activation_threshold: u8,
+    triggered_count: usize = 0,
+
+    pub fn process(self: *MockActor, protein: Protein, stdout: anytype, tick_num: usize) !void {
+        if (protein.excitation >= self.activation_threshold) {
+            self.triggered_count += 1;
+            switch (self.kind) {
+                .MotorPulse => {
+                    try stdout.print("[ACTOR] Tick {d: >2}: High Pressure at Node {d}! Triggering Motor Reflex.\n", .{ tick_num, self.protein_id });
+                },
+                .BalanceCorrection => {
+                    try stdout.print("[ACTOR] Tick {d: >2}: Wave at Node {d} triggering Balance Correction.\n", .{ tick_num, self.protein_id });
+                },
+                .AlertSignal => {
+                    try stdout.print("[ACTOR] Tick {d: >2}: Alert at Node {d}!\n", .{ tick_num, self.protein_id });
+                },
+            }
+        }
+    }
+};
+
 /// The Simulation Engine
 pub const MatrixSimulator = struct {
     allocator: std.mem.Allocator,
     matrix: []Protein,
     next_gen: []u8,
     sensors: std.ArrayListUnmanaged(MockSensor),
+    actors: std.ArrayListUnmanaged(MockActor),
     io: Io,
 
     pub fn init(allocator: std.mem.Allocator, node_count: usize, io: Io) SimulationError!MatrixSimulator {
@@ -116,6 +148,7 @@ pub const MatrixSimulator = struct {
             .matrix = matrix,
             .next_gen = next_gen,
             .sensors = .empty,
+            .actors = .empty,
             .io = io,
         };
 
@@ -127,10 +160,19 @@ pub const MatrixSimulator = struct {
         self.allocator.free(self.matrix);
         self.allocator.free(self.next_gen);
         self.sensors.deinit(self.allocator);
+        self.actors.deinit(self.allocator);
     }
 
     pub fn addSensor(self: *MatrixSimulator, target_id: u32, kind: SensorKind) !void {
         try self.sensors.append(self.allocator, .{ .target_id = target_id, .kind = kind });
+    }
+
+    pub fn addActor(self: *MatrixSimulator, protein_id: u32, kind: ActorKind, threshold: u8) !void {
+        try self.actors.append(self.allocator, .{ 
+            .protein_id = protein_id, 
+            .kind = kind, 
+            .activation_threshold = threshold 
+        });
     }
 
     pub fn reset(self: *MatrixSimulator) void {
@@ -148,7 +190,7 @@ pub const MatrixSimulator = struct {
         }
     }
 
-    pub fn tick(self: *MatrixSimulator, tick_num: usize) void {
+    pub fn tick(self: *MatrixSimulator, tick_num: usize, stdout: anytype) !void {
         // 1. Inject Sensor Data
         for (self.sensors.items) |*sensor| {
             const val = sensor.getValue(tick_num);
@@ -156,27 +198,32 @@ pub const MatrixSimulator = struct {
             target.excitation = target.excitation +| val;
         }
 
-        // 2. Reset next generation buffer
+        // 2. Compute local interactions
         for (self.next_gen) |*val| val.* = 0;
-
-        // 3. Compute local interactions
         for (self.matrix) |p| {
             p.calculateContribution(self.matrix.len, self.next_gen);
         }
 
-        // 4. Commit state changes
+        // 3. Commit state changes
         for (self.matrix, 0..) |*p, i| {
             p.excitation = self.next_gen[i];
         }
+
+        // 4. Process Actors
+        for (self.actors.items) |*actor| {
+            const p = self.matrix[@as(usize, @intCast(actor.protein_id))];
+            try actor.process(p, stdout, tick_num);
+        }
     }
 
-    pub fn visualize(self: MatrixSimulator, stdout: anytype, tick_num: usize) !void {
+    pub fn visualizeWindow(self: MatrixSimulator, stdout: anytype, tick_num: usize, start: usize, len: usize) !void {
         try stdout.print("{d: >2}: ", .{tick_num});
-        for (self.matrix) |p| {
+        const end = @min(start + len, self.matrix.len);
+        for (self.matrix[start..end]) |p| {
             const char: u8 = if (p.excitation > 150) '#' else if (p.excitation > 80) '*' else if (p.excitation > 30) '+' else ' ';
             try stdout.print("{c}", .{char});
         }
-        try stdout.print("\n", .{});
+        try stdout.print("...\n", .{});
     }
 };
 
@@ -187,27 +234,38 @@ pub fn main(init: std.process.Init) !void {
     const stdout = &stdout_file_writer.interface;
     defer stdout.flush() catch {};
 
-    try stdout.print("--- Hardened Silicon Protein Simulation with Mock Sensors ---\n", .{});
+    try stdout.print("--- Silicon Protein: Sensing-to-Action Reflex Demo ---\n", .{});
 
     var sim = try MatrixSimulator.init(init.gpa, CONFIG.NODE_COUNT, io);
     defer sim.deinit();
 
-    // Attach sensors to specific proteins
-    try sim.addSensor(0, .Thermal);     // Node 0 tracks 'temperature' (sine wave)
-    try sim.addSensor(10, .Pressure);  // Node 10 detects 'pressure' (pulses)
-    try sim.addSensor(25, .Proximity); // Node 25 detects 'proximity' (random spikes)
-    try sim.addSensor(35, .RandomNoise);
+    // Attach sensors
+    try sim.addSensor(0, .Thermal);
+    const pressure_sensor_id = CONFIG.NODE_COUNT / 2;
+    try sim.addSensor(@as(u32, @intCast(pressure_sensor_id)), .Pressure);
 
-    try stdout.print("Simulating decentralized reaction to multi-modal sensors...\n", .{});
+    // Attach an ACTOR downstream from the pressure sensor
+    // Node (pressure_sensor_id + 5) will trigger once the wave reaches it
+    const actor_id = pressure_sensor_id + 5;
+    try sim.addActor(@as(u32, @intCast(actor_id)), .MotorPulse, 50);
+
+    try stdout.print("Pressure sensor at node {d}, Actor watching node {d}.\n", .{ pressure_sensor_id, actor_id });
+    try stdout.print("Simulating reaction wave...\n", .{});
 
     var t: usize = 0;
     while (t < CONFIG.TICK_LIMIT) : (t += 1) {
-        sim.tick(t);
-        try sim.visualize(stdout, t);
+        try sim.tick(t, stdout);
+        
+        // Visualize the window around the pressure sensor and actor
+        if (t % 10 == 0 or t % 10 < 5) {
+            try sim.visualizeWindow(stdout, t, pressure_sensor_id, 20);
+        }
     }
 
-    try stdout.print("\nSimulation complete. The wave patterns represent sensor-driven bio-logic.\n", .{});
+    try stdout.print("\nReflex Simulation Complete.\n", .{});
 }
+
+// Add this to MatrixSimulator struct in next turn or via replace
 
 // --- Unit Tests ---
 test "Protein saturating math" {

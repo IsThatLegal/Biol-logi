@@ -45,6 +45,11 @@ const state = {
     axiTimer: 0,
     axiFired: false,
     axiArrived: false,
+    cameraActive: false,
+    cameraStream: null,
+    videoElement: null,
+    hiddenCanvas: null,
+    hiddenCtx: null,
 };
 
 // Canvas Setup
@@ -262,29 +267,57 @@ function tick() {
 
 // --- Sentinel Sensory Fusion Mode ---
 function runSentinelLogic() {
-    // A. Move autonomous target along a Lissajous-like curve
-    state.target.angle += 0.03 * state.dopamineModulation;
-    state.target.x = COLS / 2 + Math.cos(state.target.angle) * (COLS / 2.3);
-    state.target.y = ROWS / 2 + Math.sin(state.target.angle * 1.6) * (ROWS / 2.5);
+    // A. Move autonomous target along a Lissajous-like curve (only active if camera is off)
+    if (!state.cameraActive) {
+        state.target.angle += 0.03 * state.dopamineModulation;
+        state.target.x = COLS / 2 + Math.cos(state.target.angle) * (COLS / 2.3);
+        state.target.y = ROWS / 2 + Math.sin(state.target.angle * 1.6) * (ROWS / 2.5);
 
-    const targetXIdx = Math.round(state.target.x);
-    const targetYIdx = Math.round(state.target.y);
+        const targetXIdx = Math.round(state.target.x);
+        const targetYIdx = Math.round(state.target.y);
 
-    // B. Inject target sensory stimuli directly onto local cells
-    state.cells.forEach(cell => {
-        const dist = Math.hypot(cell.x - targetXIdx, cell.y - targetYIdx);
-        
-        // Sensory decay mapping (Vision is short, Smell is mid, RF is far and pulses)
-        if (dist < 5) {
-            cell.vision = Math.max(cell.vision, Math.round((5 - dist) * 51)); // up to 255
+        // B. Inject target sensory stimuli directly onto local cells
+        state.cells.forEach(cell => {
+            const dist = Math.hypot(cell.x - targetXIdx, cell.y - targetYIdx);
+            
+            // Sensory decay mapping (Vision is short, Smell is mid, RF is far and pulses)
+            if (dist < 5) {
+                cell.vision = Math.max(cell.vision, Math.round((5 - dist) * 51)); // up to 255
+            }
+            if (dist < 7) {
+                cell.smell = Math.max(cell.smell, Math.round((7 - dist) * 36)); // up to 255
+            }
+            if (dist < 9 && state.tickCount % 4 === 0) {
+                cell.rf = Math.max(cell.rf, Math.round((9 - dist) * 28)); // up to 255
+            }
+        });
+    } else if (state.hiddenCtx && state.videoElement) {
+        // Real-Time Camera Retina Mapping
+        try {
+            state.hiddenCtx.drawImage(state.videoElement, 0, 0, COLS, ROWS);
+            const imgData = state.hiddenCtx.getImageData(0, 0, COLS, ROWS);
+            const pixels = imgData.data;
+
+            state.cells.forEach(cell => {
+                const pixelIdx = (cell.y * COLS + cell.x) * 4;
+                const r = pixels[pixelIdx];
+                const g = pixels[pixelIdx + 1];
+                const b = pixels[pixelIdx + 2];
+                
+                // Luminance brightness value
+                const brightness = Math.round(r * 0.299 + g * 0.587 + b * 0.114);
+                
+                cell.vision = brightness;
+                
+                // Inject RF on bright spots to allow sensory fusion target lock-ons
+                if (brightness > 190) {
+                    cell.rf = Math.min(255, cell.rf + 60);
+                }
+            });
+        } catch (err) {
+            console.error("Retina frame capture failed:", err);
         }
-        if (dist < 7) {
-            cell.smell = Math.max(cell.smell, Math.round((7 - dist) * 36)); // up to 255
-        }
-        if (dist < 9 && state.tickCount % 4 === 0) {
-            cell.rf = Math.max(cell.rf, Math.round((9 - dist) * 28)); // up to 255
-        }
-    });
+    }
 
     // C. Cellular Automata Propagation & Fusion
     const nextStates = state.cells.map(c => ({
@@ -1099,6 +1132,67 @@ function setupUIListeners() {
     if (btnClear) {
         btnClear.addEventListener('click', () => {
             applyModeLayout();
+        });
+    }
+
+    const btnCamera = document.getElementById('btn-camera');
+    if (btnCamera) {
+        btnCamera.addEventListener('click', () => {
+            if (state.cameraActive) {
+                // Stop camera stream
+                if (state.cameraStream) {
+                    state.cameraStream.getTracks().forEach(track => track.stop());
+                }
+                state.cameraActive = false;
+                state.cameraStream = null;
+                if (state.videoElement) {
+                    state.videoElement.pause();
+                    state.videoElement = null;
+                }
+                btnCamera.textContent = '🎥 Enable Camera Retina Feed';
+                btnCamera.style.borderColor = 'var(--clr-emerald)';
+                btnCamera.style.color = 'var(--clr-emerald)';
+                btnCamera.style.background = 'rgba(16, 185, 129, 0.05)';
+            } else {
+                // Request camera permission preferring back camera
+                navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 320 }, 
+                        height: { ideal: 240 }, 
+                        facingMode: "environment" 
+                    } 
+                })
+                .then(stream => {
+                    state.cameraStream = stream;
+                    state.videoElement = document.createElement('video');
+                    state.videoElement.srcObject = stream;
+                    state.videoElement.setAttribute('autoplay', '');
+                    state.videoElement.setAttribute('playsinline', '');
+                    state.videoElement.play();
+
+                    state.hiddenCanvas = document.createElement('canvas');
+                    state.hiddenCanvas.width = COLS;
+                    state.hiddenCanvas.height = ROWS;
+                    state.hiddenCtx = state.hiddenCanvas.getContext('2d');
+
+                    state.cameraActive = true;
+                    
+                    // Switch to Sentinel mode
+                    if (state.mode !== 'sentinel') {
+                        const sentinelBtn = document.getElementById('btn-sentinel');
+                        if (sentinelBtn) sentinelBtn.click();
+                    }
+
+                    btnCamera.textContent = '🟢 Retina Feed Active (Click to Stop)';
+                    btnCamera.style.borderColor = 'var(--clr-rose)';
+                    btnCamera.style.color = 'var(--clr-rose)';
+                    btnCamera.style.background = 'rgba(244, 63, 94, 0.1)';
+                })
+                .catch(err => {
+                    console.error("Camera access denied:", err);
+                    alert("Could not access camera. Please verify permissions.");
+                });
+            }
         });
     }
 

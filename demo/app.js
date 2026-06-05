@@ -1124,13 +1124,15 @@ function setupUIListeners() {
         if (e.touches[0]) {
             handleCanvasInteraction(e.touches[0]);
         }
-    });
+        e.preventDefault();
+    }, { passive: false });
 
     canvas.addEventListener('touchmove', (e) => {
         if (isDrawing && e.touches[0]) {
             handleCanvasInteraction(e.touches[0]);
         }
-    });
+        e.preventDefault();
+    }, { passive: false });
 
     canvas.addEventListener('touchend', () => {
         isDrawing = false;

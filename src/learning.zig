@@ -24,15 +24,25 @@ pub const LearningProtein = packed struct {
     // Timing Trace: When did this node last fire?
     last_fired: u16,
 
-    padding: u64, // Still 256 bits total
+    padding: u160,
+
+    comptime {
+        if (@bitSizeOf(LearningProtein) != 256) {
+            @compileError("LearningProtein struct must be exactly 256 bits for FPGA alignment");
+        }
+    }
 
     pub fn tick(self: LearningProtein, next_gen_all: []LearningProtein, matrix: []LearningProtein, current_tick: usize) void {
         const self_idx = @as(usize, @intCast(self.id));
         const next = &next_gen_all[self_idx];
 
+        // Action Potential Spike threshold: if excitation is above 100, we spike to 255
+        const is_spiking = self.excitation > 100;
+        const active_excitation: u8 = if (is_spiking) 255 else self.excitation;
+
         // 1. PROPAGATION (Weighted by local memory)
-        if (self.excitation > 50) {
-            const signal = @as(i32, @intCast(self.excitation)) - 10;
+        if (active_excitation > 50) {
+            const signal = @as(i32, @intCast(active_excitation)) - 10;
             const neighbors = [_][2]i32{ .{0,-1}, .{0,1}, .{1,0}, .{-1,0} }; // N, S, E, W
             const weights = [_]u8{ self.w_north, self.w_south, self.w_east, self.w_west };
 
@@ -41,30 +51,39 @@ pub const LearningProtein = packed struct {
                 const weighted_signal = @divTrunc(signal * @as(i32, @intCast(weights[i])), 255);
                 this.spread(next_gen_all, self.id, weighted_signal, n);
             }
+        }
+
+        if (is_spiking) {
             next.last_fired = @as(u16, @intCast(current_tick));
         }
 
-        // 2. HEBBIAN LEARNING: "Cells that fire together, wire together."
-        // If I fired, check if my neighbors also fired recently.
-        if (self.excitation > 200) {
+        // 2. STDP LEARNING: Causal timing strengthens, non-causal weakens.
+        if (is_spiking) {
             this.updateWeights(next_gen_all, matrix, self.id, current_tick);
         }
 
-        // 3. DECAY & FORGETTING
-        next.excitation = self.excitation -| 15;
+        // 3. DECAY & FORGETTING / REPOLARIZATION
+        if (is_spiking) {
+            next.excitation = 0; // Repolarize after firing
+        } else {
+            next.excitation = (next.excitation -| self.excitation) +| (self.excitation -| 15);
+        }
+
         // Natural weight decay (prevents permanent obsessions)
         if (current_tick % 50 == 0) {
-            next.w_north = self.w_north -| 1;
-            next.w_south = self.w_south -| 1;
-            next.w_east = self.w_east -| 1;
-            next.w_west = self.w_west -| 1;
+            next.w_north = next.w_north -| 1;
+            next.w_south = next.w_south -| 1;
+            next.w_east = next.w_east -| 1;
+            next.w_west = next.w_west -| 1;
         }
     }
 
     fn updateWeights(next_gen: []LearningProtein, matrix: []LearningProtein, id: u32, t: usize) void {
+        _ = t;
         const x = id % CONFIG.WIDTH;
         const y = id / CONFIG.WIDTH;
         const next_self = &next_gen[id];
+        const self_last_fired = matrix[id].last_fired;
         const neighbors = [_][2]i32{ .{0,-1}, .{0,1}, .{1,0}, .{-1,0} };
         
         for (neighbors, 0..) |n, i| {
@@ -74,13 +93,22 @@ pub const LearningProtein = packed struct {
                 const target_idx = @as(usize, @intCast(ny * CONFIG.WIDTH + nx));
                 const target = matrix[target_idx];
                 
-                // If neighbor fired in the last 2 ticks -> STRENGTHEN
-                if (@as(usize, @intCast(t)) - target.last_fired <= 2) {
+                if (target.last_fired > self_last_fired and target.last_fired - self_last_fired <= 3) {
                     switch (i) {
-                        0 => next_self.w_north = next_self.w_north +| 20,
-                        1 => next_self.w_south = next_self.w_south +| 20,
-                        2 => next_self.w_east = next_self.w_east +| 20,
-                        3 => next_self.w_west = next_self.w_west +| 20,
+                        0 => next_self.w_north = next_self.w_north +| 25,
+                        1 => next_self.w_south = next_self.w_south +| 25,
+                        2 => next_self.w_east = next_self.w_east +| 25,
+                        3 => next_self.w_west = next_self.w_west +| 25,
+                        else => {},
+                    }
+                }
+                // 2. LTD (Non-causal): Neighbor fired before me -> Weaken my output weight to them
+                else if (target.last_fired < self_last_fired and self_last_fired - target.last_fired <= 3) {
+                    switch (i) {
+                        0 => next_self.w_north = next_self.w_north -| 15,
+                        1 => next_self.w_south = next_self.w_south -| 15,
+                        2 => next_self.w_east = next_self.w_east -| 15,
+                        3 => next_self.w_west = next_self.w_west -| 15,
                         else => {},
                     }
                 }
@@ -127,10 +155,11 @@ pub fn main(init: std.process.Init) !void {
         try stdout.print("--- LEARNING TEST: Synaptic Plasticity --- \n", .{});
         try stdout.print("Tick: {d: >3} | Method: Hebbian Path Reinforcement\n\n", .{t});
 
-        // SIMULATION: Repeated stimulus at Node (10, 5) moving to (11, 5)
-        // We want the system to "Learn" this specific path.
-        if (t % 10 < 2) {
+        // SIMULATION: Repeated causal stimulus from Node (10, 5) to (11, 5)
+        // Node 10 is stimulated first, and Node 11 is stimulated 1 tick later.
+        if (t % 10 == 0) {
              matrix[5 * CONFIG.WIDTH + 10].excitation = 255;
+        } else if (t % 10 == 1) {
              matrix[5 * CONFIG.WIDTH + 11].excitation = 255;
         }
 
@@ -156,10 +185,42 @@ pub fn main(init: std.process.Init) !void {
         if (matrix[5 * CONFIG.WIDTH + 10].w_east > 200) {
             try stdout.print("\n>>> KNOWLEDGE ACQUIRED: Path Reinforcement Success <<<\n", .{});
         } else {
-            try stdout.print("\nPracticing stimulus... (Weight Building)\n", .{});
+            try stdout.print("\nPracticing stimulus... (Weight Building) | Node 160 w_east = {d}\n", .{matrix[5 * CONFIG.WIDTH + 10].w_east});
         }
 
         try stdout.flush();
         try Io.sleep(io, .{ .nanoseconds = 30 * std.time.ns_per_ms }, .awake);
     }
+}
+
+test "LearningProtein size and basic STDP" {
+    const count = CONFIG.WIDTH * CONFIG.HEIGHT;
+    var matrix: [count]LearningProtein = undefined;
+    for (&matrix, 0..) |*p, i| {
+        p.* = .{ .id = @as(u32, @intCast(i)), .excitation = 0, .energy = 255, .w_north = 128, .w_south = 128, .w_east = 128, .w_west = 128, .last_fired = 0, .padding = 0 };
+    }
+    var next_gen = matrix;
+    
+    const node_idx = 5 * CONFIG.WIDTH + 10;
+    const east_idx = 5 * CONFIG.WIDTH + 11;
+
+    // t=0: Node 160 spikes
+    matrix[node_idx].excitation = 255;
+    for (matrix, 0..) |p, i| next_gen[i] = p;
+    matrix[node_idx].tick(&next_gen, &matrix, 0);
+    matrix = next_gen;
+    
+    // t=1: Node 161 spikes
+    matrix[east_idx].excitation = 255;
+    for (matrix, 0..) |p, i| next_gen[i] = p;
+    matrix[east_idx].tick(&next_gen, &matrix, 1);
+    matrix = next_gen;
+    
+    // t=10: Node 160 spikes again
+    matrix[node_idx].excitation = 255;
+    for (matrix, 0..) |p, i| next_gen[i] = p;
+    matrix[node_idx].tick(&next_gen, &matrix, 10);
+    
+    // Node 160 should strengthen its east weight towards Node 161
+    try std.testing.expect(next_gen[node_idx].w_east > 128);
 }

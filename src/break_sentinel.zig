@@ -14,7 +14,13 @@ pub const SentinelProtein = packed struct {
     resonance: u8,   
     energy: u8,      // METABOLIC BUDGET
     last_peak: u16,  
-    padding: u128,   
+    padding: u176,
+
+    comptime {
+        if (@bitSizeOf(SentinelProtein) != 256) {
+            @compileError("SentinelProtein struct must be exactly 256 bits for FPGA alignment");
+        }
+    }
 
     pub fn tick(self: SentinelProtein, next_gen_all: []SentinelProtein, current_tick: usize) void {
         const self_idx = @as(usize, @intCast(self.id));

@@ -88,4 +88,37 @@ pub fn build(b: *std.Build) void {
     });
     const run_reward_learning_tests = b.addRunArtifact(reward_learning_tests);
     test_step.dependOn(&run_reward_learning_tests.step);
+
+    // Tests for sonar
+    const sonar_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/sonar.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_sonar_tests = b.addRunArtifact(sonar_tests);
+    test_step.dependOn(&run_sonar_tests.step);
+
+    // Tests for learning
+    const learning_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/learning.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_learning_tests = b.addRunArtifact(learning_tests);
+    test_step.dependOn(&run_learning_tests.step);
+
+    // Tests for sentinel
+    const sentinel_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/sentinel.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_sentinel_tests = b.addRunArtifact(sentinel_tests);
+    test_step.dependOn(&run_sentinel_tests.step);
 }

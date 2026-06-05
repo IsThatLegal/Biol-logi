@@ -13,7 +13,13 @@ pub const ChaosProtein = packed struct {
     energy: u8,
     role: u8, 
     
-    padding: u208,
+    padding: u200,
+
+    comptime {
+        if (@bitSizeOf(ChaosProtein) != 256) {
+            @compileError("ChaosProtein struct must be exactly 256 bits for FPGA alignment");
+        }
+    }
 
     pub fn tick(self: ChaosProtein, next_gen_all: []ChaosProtein, current_tick: usize) void {
         _ = current_tick;

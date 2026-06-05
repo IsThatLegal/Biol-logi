@@ -23,21 +23,32 @@ pub const RewardProtein = packed struct {
     // In biology, this is the "tagging" of active synapses.
     eligibility_trace: u8,
 
-    padding: u152, // Still 256 bits
+    padding: u176,
 
-    pub fn tick(self: *RewardProtein, next_gen_all: []RewardProtein, dopamine_wave: u8) void {
+    comptime {
+        if (@bitSizeOf(RewardProtein) != 256) {
+            @compileError("RewardProtein struct must be exactly 256 bits for FPGA alignment");
+        }
+    }
+
+    pub fn tick(self: RewardProtein, next_gen_all: []RewardProtein, dopamine_wave: u8) void {
+        const self_idx = @as(usize, @intCast(self.id));
+        const next = &next_gen_all[self_idx];
+
         // 1. REWARD LOCK-IN: If Dopamine is high AND I was recently active, STRENGTHEN.
         if (dopamine_wave > 100 and self.eligibility_trace > 50) {
-            self.w_north = self.w_north +| 30;
-            self.w_south = self.w_south +| 30;
-            self.w_east  = self.w_east  +| 30;
-            self.w_west  = self.w_west  +| 30;
+            next.w_north = self.w_north +| 30;
+            next.w_south = self.w_south +| 30;
+            next.w_east  = self.w_east  +| 30;
+            next.w_west  = self.w_west  +| 30;
         }
+
+        var final_trace = self.eligibility_trace;
 
         // 2. PROPAGATION (Weighted by local memory)
         if (self.excitation > 50) {
             const signal = @as(i32, @intCast(self.excitation)) - 15;
-            const weights = [_]u8{ self.w_north, self.w_south, self.w_east, self.w_west };
+            const weights = [_]u8{ next.w_north, next.w_south, next.w_east, next.w_west };
             const neighbors = [_][2]i32{ .{0,-1}, .{0,1}, .{1,0}, .{-1,0} };
 
             for (neighbors, 0..) |n, i| {
@@ -45,18 +56,18 @@ pub const RewardProtein = packed struct {
                 this.spread(next_gen_all, self.id, weighted_val, n);
             }
             
-            self.eligibility_trace = 255; // Tag for reward
+            final_trace = 255; // Tag for reward
         }
 
         // 3. DECAY
-        self.excitation = self.excitation -| 20;
-        self.eligibility_trace = self.eligibility_trace -| 10;
+        next.eligibility_trace = final_trace -| 10;
+        next.excitation = (next.excitation -| self.excitation) +| (self.excitation -| 20);
         
         // Natural weight drift (Forgetting unused paths)
-        if (self.w_north > 50) self.w_north -= 1;
-        if (self.w_south > 50) self.w_south -= 1;
-        if (self.w_east  > 50)  self.w_east  -= 1;
-        if (self.w_west  > 50)  self.w_west  -= 1;
+        if (next.w_north > 50) next.w_north -= 1;
+        if (next.w_south > 50) next.w_south -= 1;
+        if (next.w_east  > 50) next.w_east  -= 1;
+        if (next.w_west  > 50) next.w_west  -= 1;
     }
 
     fn spread(next_gen: []RewardProtein, id: u32, val: i32, n: [2]i32) void {

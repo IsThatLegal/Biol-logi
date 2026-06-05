@@ -27,41 +27,58 @@ pub const SentinelProtein = packed struct {
     excitation: u8,
     role: u8,
     energy: u8,
-    
-    // FIX 2: THE SCALING MIRAGE (ROUTING LATENCY)
-    // Signals now take 'delay' ticks to travel based on physical distance
-    // This is stored as a 'buffer' of in-flight signals
     latency_buffer: u8, 
+    destination_bus_id: u8,
+    route_delay: u8,
     
-    padding: u208, // Still 256 bits
+    padding: u176,
 
-    pub fn tick(self: *SentinelProtein, next_gen_all: []SentinelProtein, current_tick: usize) void {
+    comptime {
+        if (@bitSizeOf(SentinelProtein) != 256) {
+            @compileError("SentinelProtein struct must be exactly 256 bits for FPGA alignment");
+        }
+    }
+
+    pub fn tick(self: *SentinelProtein, next_gen_all: []SentinelProtein, current_tick: usize, width: usize, height: usize) void {
         _ = current_tick;
         
         // Handle Latency Buffer: Signal only hits 'excitation' after delay
         if (self.latency_buffer > 0) {
             self.excitation = self.excitation +| (self.latency_buffer / 2);
+            // Subtract the consumed latency_buffer from next_gen_all, preserving any new incoming signals
+            next_gen_all[self.id].latency_buffer = next_gen_all[self.id].latency_buffer -| self.latency_buffer;
             self.latency_buffer = 0;
         }
 
         if (self.excitation > 50) {
             const signal = self.excitation -| 20;
-            // Spread to neighbors (simulating physical wire delay)
-            this.spread(next_gen_all, self.id, signal);
+            if (self.destination_bus_id > 0) {
+                // Long-range AXI Highway direct routing
+                const target_idx = @as(usize, @intCast(self.destination_bus_id - 1));
+                if (target_idx < next_gen_all.len) {
+                    next_gen_all[target_idx].latency_buffer = next_gen_all[target_idx].latency_buffer +| signal;
+                }
+            } else {
+                // Standard local neighborhood spread
+                this.spread(next_gen_all, self.id, signal, width, height);
+            }
         }
 
         self.excitation = self.excitation -| 15;
+        next_gen_all[self.id].excitation = self.excitation;
     }
 
-    fn spread(next_gen: []SentinelProtein, id: u32, val: u8) void {
+    fn spread(next_gen: []SentinelProtein, id: u32, val: u8, width: usize, height: usize) void {
         const neighbors = [_][2]i32{ .{0,1}, .{0,-1}, .{1,0}, .{-1,0} };
         for (neighbors) |n| {
-            const x = id % CONFIG.WIDTH;
-            const y = id / CONFIG.WIDTH;
+            const x = id % width;
+            const y = id / width;
             const nx = @as(i64, @intCast(x)) + n[0];
             const ny = @as(i64, @intCast(y)) + n[1];
-            if (nx >= 0 and nx < CONFIG.WIDTH and ny >= 0 and ny < CONFIG.HEIGHT) {
-                const target = @as(usize, @intCast(ny * CONFIG.WIDTH + nx));
+            if (nx >= 0 and nx < @as(i64, @intCast(width)) and ny >= 0 and ny < @as(i64, @intCast(height))) {
+                const u_nx = @as(usize, @intCast(nx));
+                const u_ny = @as(usize, @intCast(ny));
+                const target = u_ny * width + u_nx;
                 // ADDING SPATIAL LATENCY: Instead of instant update, we put it in the buffer
                 // This simulates the 'wire length' on the FPGA chip.
                 next_gen[target].latency_buffer = next_gen[target].latency_buffer +| val;
@@ -113,7 +130,7 @@ pub fn main(init: std.process.Init) !void {
         for (matrix, 0..) |p, i| next_gen[i] = p;
         for (matrix, 0..) |*p, i| {
             _ = i;
-            p.tick(next_gen, t);
+            p.tick(next_gen, t, CONFIG.WIDTH, CONFIG.HEIGHT);
         }
         for (matrix, 0..) |*p, i| p.* = next_gen[i];
 

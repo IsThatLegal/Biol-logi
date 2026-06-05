@@ -28,7 +28,8 @@ pub fn main(init: std.process.Init) !void {
         p.* = .{ 
             .id = @as(u32, @intCast(i)), .s_vision = 0, .s_hearing = 0, .s_touch = 0, 
             .s_smell = 0, .s_taste = 0, .s_rf = 0, .resonance = 0, .last_peak = 0, 
-            .energy = 255, .role = 0, .threshold = 30, .is_echoing = false, .padding = 0 
+            .energy = 255, .role = 0, .threshold = 30, .is_echoing = false,
+            .destination_bus_id = 0, .route_delay = 0, .padding = 0 
         };
     }
 
@@ -53,7 +54,7 @@ pub fn main(init: std.process.Init) !void {
 
         // 2. LOGIC
         for (matrix, 0..) |p, i| next_gen[i] = p;
-        for (matrix) |p| p.tick(next_gen, t);
+        for (matrix) |p| p.tick(next_gen, t, CONFIG.WIDTH, CONFIG.HEIGHT);
         for (matrix, 0..) |*p, i| p.* = next_gen[i];
 
         // 3. DRAW PERCEPTION FIELD

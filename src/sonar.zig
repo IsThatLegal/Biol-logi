@@ -18,18 +18,38 @@ pub const SonarProtein = packed struct {
     excitation: u8,      
     timer: u8,           
     distance_map: u8,    
-    is_echoing: bool,    
+    is_echoing: bool,
+    padding: u63,
+
+    comptime {
+        if (@bitSizeOf(SonarProtein) != 128) {
+            @compileError("SonarProtein struct must be exactly 128 bits for FPGA alignment");
+        }
+    }
 
     pub fn tick(self: *SonarProtein, next_gen_all: []SonarProtein, current_gen_all: []SonarProtein) void {
         const role = @as(ProteinRole, @enumFromInt(self.role));
 
+        // Refractory decrement for standard nodes
+        if (role == .Standard) {
+            const next_std = &next_gen_all[self.id];
+            if (self.timer > 0) {
+                next_std.timer = self.timer - 1;
+            }
+        }
+
         // 1. Propagation Logic
         if (self.excitation > 50) {
-            const signal = self.excitation -| 10;
+            const signal = self.excitation -| 4;
             
             if (role == .Obstacle) {
                 // REFLECT: Send back to where it came from
                 self.exciteNeighbor(next_gen_all, -1, signal);
+            } else if (role == .Emitter) {
+                // Emitter only propagates the initial pulse, does not propagate echo backwards
+                if (self.timer == 0) {
+                    self.exciteNeighbor(next_gen_all, 1, signal);
+                }
             } else {
                 // PROPAGATE: Standard wave movement
                 self.exciteNeighbor(next_gen_all, 1, signal);
@@ -43,15 +63,16 @@ pub const SonarProtein = packed struct {
             if (self.is_echoing) {
                 next_emitter.timer = self.timer +| 1;
                 // If we receive a signal while echoing (from the echo return), record distance
-                if (self.excitation > 50 and self.timer > 4) {
-                    next_emitter.distance_map = self.timer;
+                if (self.excitation > 50 and self.timer > 8) {
+                    next_emitter.distance_map = self.timer - 1;
                     next_emitter.is_echoing = false;
                 }
             }
         }
 
         // 3. Natural Decay
-        next_gen_all[self.id].excitation = self.excitation -| 8;
+        const decay_val: u8 = if (role == .Obstacle) 0 else 140;
+        next_gen_all[self.id].excitation = (next_gen_all[self.id].excitation -| self.excitation) +| (self.excitation -| decay_val);
         _ = current_gen_all;
     }
 
@@ -59,8 +80,13 @@ pub const SonarProtein = packed struct {
         const target_idx = @as(i64, @intCast(self.id)) + offset;
         if (target_idx >= 0 and target_idx < @as(i64, @intCast(CONFIG.NODE_COUNT))) {
             const idx = @as(usize, @intCast(target_idx));
-            if (next_gen_all[idx].excitation < val) {
-                next_gen_all[idx].excitation = val;
+            if (next_gen_all[idx].timer == 0 or next_gen_all[idx].role == @intFromEnum(ProteinRole.Emitter)) {
+                if (next_gen_all[idx].excitation < val) {
+                    next_gen_all[idx].excitation = val;
+                }
+                if (next_gen_all[idx].role == @intFromEnum(ProteinRole.Standard)) {
+                    next_gen_all[idx].timer = 3; // 3 ticks of refractory period
+                }
             }
         }
     }
@@ -88,6 +114,7 @@ pub fn main(init: std.process.Init) !void {
             .timer = 0,
             .distance_map = 0,
             .is_echoing = false,
+            .padding = 0,
         };
     }
 
@@ -128,4 +155,19 @@ pub fn main(init: std.process.Init) !void {
     }
 
     try stdout.print("\nSonar Simulation Complete. Decentralized Spatial Mapping Successful.\n", .{});
+}
+
+test "SonarProtein size and basic tick" {
+    var matrix = [_]SonarProtein{
+        .{ .id = 0, .role = @intFromEnum(ProteinRole.Emitter), .excitation = 255, .timer = 0, .distance_map = 0, .is_echoing = true, .padding = 0 },
+        .{ .id = 1, .role = @intFromEnum(ProteinRole.Standard), .excitation = 0, .timer = 0, .distance_map = 0, .is_echoing = false, .padding = 0 },
+        .{ .id = 2, .role = @intFromEnum(ProteinRole.Standard), .excitation = 0, .timer = 0, .distance_map = 0, .is_echoing = false, .padding = 0 },
+    };
+    var next_gen = matrix;
+    
+    matrix[0].tick(&next_gen, &matrix);
+    matrix[1].tick(&next_gen, &matrix);
+    
+    // Wave should propagate from Emitter to Node 1
+    try std.testing.expect(next_gen[1].excitation > 0);
 }

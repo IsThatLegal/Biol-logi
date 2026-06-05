@@ -30,10 +30,18 @@ pub const SentinelProtein = packed struct {
     threshold: u8,   
     last_peak: u16,  
     is_echoing: bool,
+    destination_bus_id: u8,
+    route_delay: u8,
     
-    padding: u87,   
+    padding: u111,   
 
-    pub fn tick(self: SentinelProtein, next_gen_all: []SentinelProtein, current_tick: usize) void {
+    comptime {
+        if (@bitSizeOf(SentinelProtein) != 256) {
+            @compileError("SentinelProtein struct must be exactly 256 bits for FPGA alignment");
+        }
+    }
+
+    pub fn tick(self: SentinelProtein, next_gen_all: []SentinelProtein, current_tick: usize, width: usize, height: usize) void {
         const self_idx = @as(usize, @intCast(self.id));
         const next = &next_gen_all[self_idx];
 
@@ -43,39 +51,41 @@ pub const SentinelProtein = packed struct {
         }
 
         if (self.s_smell > 100) {
-            this.spread(next_gen_all, self.id, @as(i32, @intCast(self.s_smell)) - 5, .Smell);
+            this.spread(next_gen_all, self.id, @as(i32, @intCast(self.s_smell)) - 5, .Smell, width, height);
         }
 
         if (self.s_touch > 200) {
-            this.spread(next_gen_all, self.id, 255, .Touch);
+            this.spread(next_gen_all, self.id, 255, .Touch, width, height);
         }
 
         // 2. STANDARD PROPAGATION (Vision/Hearing)
-        if (self.s_vision > 40) this.spread(next_gen_all, self.id, @divTrunc(@as(i32, @intCast(self.s_vision)) - 10, 4), .Vision);
-        if (self.s_hearing > 50) this.spread(next_gen_all, self.id, @as(i32, @intCast(self.s_hearing)) - 10, .Hearing);
+        if (self.s_vision > 40) this.spread(next_gen_all, self.id, @divTrunc(@as(i32, @intCast(self.s_vision)) - 10, 4), .Vision, width, height);
+        if (self.s_hearing > 50) this.spread(next_gen_all, self.id, @as(i32, @intCast(self.s_hearing)) - 10, .Hearing, width, height);
 
         // 3. DECAY
-        next.s_vision = self.s_vision -| 20;
-        next.s_hearing = self.s_hearing -| 15;
-        next.s_touch = self.s_touch -| 60;  
-        next.s_smell = self.s_smell -| 5;   
-        next.s_taste = self.s_taste -| 25;
-        next.s_rf = self.s_rf -| 10;
-        next.resonance = self.resonance -| 5;
+        next.s_vision = (next.s_vision -| self.s_vision) +| (self.s_vision -| 20);
+        next.s_hearing = (next.s_hearing -| self.s_hearing) +| (self.s_hearing -| 15);
+        next.s_touch = (next.s_touch -| self.s_touch) +| (self.s_touch -| 60);  
+        next.s_smell = (next.s_smell -| self.s_smell) +| (self.s_smell -| 5);   
+        next.s_taste = (next.s_taste -| self.s_taste) +| (self.s_taste -| 25);
+        next.s_rf = (next.s_rf -| self.s_rf) +| (self.s_rf -| 10);
+        next.resonance = next.resonance -| 5;
         _ = current_tick;
     }
 
     const Mode = enum { Vision, Hearing, Touch, Smell, Taste, RF };
 
-    fn spread(next_gen: []SentinelProtein, id: u32, val: i32, mode: Mode) void {
-        const x = id % CONFIG.WIDTH;
-        const y = id / CONFIG.WIDTH;
+    fn spread(next_gen: []SentinelProtein, id: u32, val: i32, mode: Mode, width: usize, height: usize) void {
+        const x = id % width;
+        const y = id / width;
         const neighbors = [_][2]i32{ .{0,1}, .{0,-1}, .{1,0}, .{-1,0} };
         for (neighbors) |n| {
             const nx = @as(i64, @intCast(x)) + n[0];
             const ny = @as(i64, @intCast(y)) + n[1];
-            if (nx >= 0 and nx < CONFIG.WIDTH and ny >= 0 and ny < CONFIG.HEIGHT) {
-                const target = @as(usize, @intCast(ny * CONFIG.WIDTH + nx));
+            if (nx >= 0 and nx < @as(i64, @intCast(width)) and ny >= 0 and ny < @as(i64, @intCast(height))) {
+                const u_nx = @as(usize, @intCast(nx));
+                const u_ny = @as(usize, @intCast(ny));
+                const target = u_ny * width + u_nx;
                 const u_val = @as(u8, @intCast(@max(0, val)));
                 switch (mode) {
                     .Vision => next_gen[target].s_vision = next_gen[target].s_vision +| u_val,
@@ -109,7 +119,8 @@ pub fn main(init: std.process.Init) !void {
         p.* = .{ 
             .id = @as(u32, @intCast(i)), .s_vision = 0, .s_hearing = 0, .s_touch = 0, 
             .s_smell = 0, .s_taste = 0, .s_rf = 0, .resonance = 0, .last_peak = 0, 
-            .energy = 255, .role = 0, .threshold = 30, .is_echoing = false, .padding = 0 
+            .energy = 255, .role = 0, .threshold = 30, .is_echoing = false,
+            .destination_bus_id = 0, .route_delay = 0, .padding = 0 
         };
     }
 
@@ -133,7 +144,7 @@ pub fn main(init: std.process.Init) !void {
 
         // 3. Logic
         for (matrix, 0..) |p, i| next_gen[i] = p;
-        for (matrix) |p| p.tick(next_gen, t);
+        for (matrix) |p| p.tick(next_gen, t, CONFIG.WIDTH, CONFIG.HEIGHT);
         for (matrix, 0..) |*p, i| p.* = next_gen[i];
 
         // 4. Draw
@@ -157,4 +168,21 @@ pub fn main(init: std.process.Init) !void {
         try stdout.flush();
         try Io.sleep(io, .{ .nanoseconds = 40 * std.time.ns_per_ms }, .awake);
     }
+}
+
+test "SentinelProtein size and basic multi-modal fusion" {
+    var matrix = [_]SentinelProtein{
+        .{ 
+            .id = 0, .s_vision = 255, .s_hearing = 0, .s_touch = 0, 
+            .s_smell = 0, .s_taste = 0, .s_rf = 255, .resonance = 0, .last_peak = 0, 
+            .energy = 255, .role = 0, .threshold = 30, .is_echoing = false,
+            .destination_bus_id = 0, .route_delay = 0, .padding = 0 
+        },
+    };
+    var next_gen = matrix;
+    
+    matrix[0].tick(&next_gen, 0, 1, 1);
+    
+    // Cross-modal fusion: s_vision > 200 and s_rf > 150 -> resonance should be strengthened
+    try std.testing.expect(next_gen[0].resonance > 0);
 }

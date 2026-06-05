@@ -50,6 +50,15 @@ const state = {
     videoElement: null,
     hiddenCanvas: null,
     hiddenCtx: null,
+    audioSonarActive: false,
+    audioContext: null,
+    audioStream: null,
+    audioAnalyser: null,
+    pingTimestamp: 0,
+    waitingForEcho: false,
+    frequencyDataArray: null,
+    targetBinIndex: -1,
+    audioSonarEchoDetected: false,
 };
 
 // Canvas Setup
@@ -389,6 +398,47 @@ function runSonarLogic() {
         triggerSonarPulse();
     }
 
+    // A. Real-World Microphone Echo Analyzer
+    if (state.audioSonarActive && state.audioAnalyser && state.waitingForEcho) {
+        state.audioAnalyser.getByteFrequencyData(state.frequencyDataArray);
+        const amplitude = state.frequencyDataArray[state.targetBinIndex];
+        const timeSincePing = performance.now() - state.pingTimestamp;
+
+        // Guard time: Ignore immediate leakage from speaker (first 140ms)
+        if (timeSincePing > 140 && timeSincePing < 1200) {
+            // Check if 3kHz frequency amplitude spikes
+            if (amplitude > 95) {
+                state.waitingForEcho = false;
+                
+                const timeSeconds = timeSincePing / 1000;
+                const distanceMeters = (timeSeconds * 343) / 2; // Time of Flight distance formula
+
+                // Scale: 1 meter = 10 cells grid resolution
+                const obstacleCol = Math.min(38, Math.max(5, Math.round(distanceMeters * 10) + 2));
+                const targetCellIdx = 10 * COLS + obstacleCol;
+
+                if (state.cells[targetCellIdx]) {
+                    state.cells[targetCellIdx].excitation = 240; // Trigger physical reflection wave
+                    state.cells[targetCellIdx].role = 'obstacle'; // Paint temporary physical echo obstacle
+                    
+                    setTimeout(() => {
+                        if (state.cells[targetCellIdx] && obstacleCol !== 22) {
+                            state.cells[targetCellIdx].role = 'standard';
+                        }
+                    }, 1400);
+                }
+
+                // Show distance in cm in the diagnostics
+                state.sonarDistance = Math.round(distanceMeters * 100);
+                state.sonarIsEchoing = false;
+            }
+        } else if (timeSincePing >= 1200) {
+            // Echo timeout
+            state.waitingForEcho = false;
+            state.sonarIsEchoing = false;
+        }
+    }
+
     // Propagation logic
     const nextExcitation = state.cells.map(c => c.excitation);
     const nextTimer = state.cells.map(c => c.timer);
@@ -404,7 +454,6 @@ function runSonarLogic() {
     state.cells.forEach(cell => {
         if (cell.excitation > 50) {
             const signal = cell.excitation - 8;
-            const neighbors = getNeighbors(cell.x, cell.y);
 
             if (cell.role === 'obstacle') {
                 // Reflect: propagate back to left neighbor
@@ -425,7 +474,7 @@ function runSonarLogic() {
     });
 
     // Sonar Timing & Distance Mapping (Emitter logic)
-    if (state.sonarIsEchoing) {
+    if (state.sonarIsEchoing && !state.audioSonarActive) {
         state.sonarTimer++;
         nextTimer[emitterIdx] = state.sonarTimer;
 
@@ -477,6 +526,43 @@ function triggerSonarPulse() {
         state.sonarIsEchoing = true;
         state.sonarTimer = 0;
         state.sonarDistance = 0;
+
+        // Trigger physical acoustic ping
+        if (state.audioSonarActive && state.audioContext) {
+            playAcousticPing();
+        }
+    }
+}
+
+function playAcousticPing() {
+    if (!state.audioContext) return;
+    if (state.audioContext.state === 'suspended') {
+        state.audioContext.resume();
+    }
+
+    try {
+        const osc = state.audioContext.createOscillator();
+        const gain = state.audioContext.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(3000, state.audioContext.currentTime); // 3kHz ping
+
+        // Quick ramp envelope
+        gain.gain.setValueAtTime(0, state.audioContext.currentTime);
+        gain.gain.linearRampToValueAtTime(0.8, state.audioContext.currentTime + 0.005);
+        gain.gain.setValueAtTime(0.8, state.audioContext.currentTime + 0.035);
+        gain.gain.exponentialRampToValueAtTime(0.001, state.audioContext.currentTime + 0.045);
+
+        osc.connect(gain);
+        gain.connect(state.audioContext.destination);
+
+        osc.start();
+        osc.stop(state.audioContext.currentTime + 0.05);
+
+        state.pingTimestamp = performance.now();
+        state.waitingForEcho = true;
+    } catch (err) {
+        console.error("Failed to play acoustic ping:", err);
     }
 }
 
@@ -1192,6 +1278,79 @@ function setupUIListeners() {
                     console.error("Camera access denied:", err);
                     alert("Could not access camera. Please verify permissions.");
                 });
+            }
+        });
+    }
+
+    const btnAudioSonar = document.getElementById('btn-audio-sonar');
+    if (btnAudioSonar) {
+        btnAudioSonar.addEventListener('click', () => {
+            if (state.audioSonarActive) {
+                // Disable audio sonar
+                state.audioSonarActive = false;
+                if (state.audioStream) {
+                    state.audioStream.getTracks().forEach(track => track.stop());
+                }
+                state.audioStream = null;
+                state.audioAnalyser = null;
+                state.audioContext = null;
+                
+                btnAudioSonar.textContent = '🔊 Enable Audio Sonar (Mic+Spk)';
+                btnAudioSonar.style.borderColor = 'var(--clr-cyan)';
+                btnAudioSonar.style.color = 'var(--clr-cyan)';
+                btnAudioSonar.style.background = 'rgba(6, 182, 212, 0.05)';
+            } else {
+                // Request microphone permissions
+                try {
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    const context = new AudioContextClass();
+                    
+                    navigator.mediaDevices.getUserMedia({ 
+                        audio: { 
+                            echoCancellation: false, 
+                            noiseSuppression: false, 
+                            autoGainControl: false 
+                        } 
+                    })
+                    .then(stream => {
+                        state.audioContext = context;
+                        state.audioStream = stream;
+                        
+                        const source = context.createMediaStreamSource(stream);
+                        const analyser = context.createAnalyser();
+                        analyser.fftSize = 512;
+                        source.connect(analyser);
+                        
+                        state.audioAnalyser = analyser;
+                        
+                        const bufferLength = analyser.frequencyBinCount;
+                        state.frequencyDataArray = new Uint8Array(bufferLength);
+                        
+                        // Find bin index corresponding to 3000Hz
+                        const sampleRate = context.sampleRate;
+                        state.targetBinIndex = Math.round(3000 / (sampleRate / analyser.fftSize));
+                        
+                        state.audioSonarActive = true;
+                        
+                        // Switch to Sonar mode
+                        if (state.mode !== 'sonar') {
+                            const sonarBtn = document.getElementById('btn-sonar');
+                            if (sonarBtn) sonarBtn.click();
+                        }
+
+                        btnAudioSonar.textContent = '🟢 Audio Sonar Active (Click to Stop)';
+                        btnAudioSonar.style.borderColor = 'var(--clr-rose)';
+                        btnAudioSonar.style.color = 'var(--clr-rose)';
+                        btnAudioSonar.style.background = 'rgba(244, 63, 94, 0.1)';
+                    })
+                    .catch(err => {
+                        console.error("Microphone access denied:", err);
+                        alert("Could not access microphone. Please check permissions.");
+                    });
+                } catch (e) {
+                    console.error("Web Audio API not supported:", e);
+                    alert("Acoustic Sonar not supported in this browser.");
+                }
             }
         });
     }

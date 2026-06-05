@@ -52,27 +52,33 @@ pub fn build(b: *std.Build) void {
 
     // Tests for protein_core
     const protein_core_tests = b.addTest(.{
-        .root_source_file = b.path("src/protein_core.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/protein_core.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     const run_protein_core_tests = b.addRunArtifact(protein_core_tests);
     test_step.dependOn(&run_protein_core_tests.step);
 
     // Tests for orchestrator
     const orchestrator_tests = b.addTest(.{
-        .root_source_file = b.path("src/orchestrator.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/orchestrator.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     const run_orchestrator_tests = b.addRunArtifact(orchestrator_tests);
     test_step.dependOn(&run_orchestrator_tests.step);
 
     // Tests for reward_learning
     const reward_learning_tests = b.addTest(.{
-        .root_source_file = b.path("src/reward_learning.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/reward_learning.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     const run_reward_learning_tests = b.addRunArtifact(reward_learning_tests);
     test_step.dependOn(&run_reward_learning_tests.step);

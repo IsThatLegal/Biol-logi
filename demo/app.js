@@ -401,13 +401,19 @@ function runSonarLogic() {
     // A. Real-World Microphone Echo Analyzer
     if (state.audioSonarActive && state.audioAnalyser && state.waitingForEcho) {
         state.audioAnalyser.getByteFrequencyData(state.frequencyDataArray);
-        const amplitude = state.frequencyDataArray[state.targetBinIndex];
+        
+        // Scan target bin and adjacent bins to account for frequency leakage/sample rate offset
+        const bin1 = state.frequencyDataArray[state.targetBinIndex - 1] || 0;
+        const bin2 = state.frequencyDataArray[state.targetBinIndex] || 0;
+        const bin3 = state.frequencyDataArray[state.targetBinIndex + 1] || 0;
+        const amplitude = Math.max(bin1, bin2, bin3);
+
         const timeSincePing = performance.now() - state.pingTimestamp;
 
         // Guard time: Ignore immediate leakage from speaker (first 140ms)
         if (timeSincePing > 140 && timeSincePing < 1200) {
-            // Check if 3kHz frequency amplitude spikes
-            if (amplitude > 95) {
+            // Lowered threshold to 70 for higher sensitivity on standard mobile mics
+            if (amplitude > 70) {
                 state.waitingForEcho = false;
                 
                 const timeSeconds = timeSincePing / 1000;
@@ -1053,6 +1059,22 @@ function updateMetricsUI() {
             netStateText.textContent = 'RECOVERING';
             netStateText.className = 'status-display recovering';
             netSubtext.textContent = 'Repolarizing metabolic cell reserves';
+        } else if (state.mode === 'sonar') {
+            // Sonar Mode Dynamic UI Display
+            if (state.sonarIsEchoing) {
+                netStateText.textContent = 'PING SENT...';
+                netStateText.className = 'status-display recovering';
+                netSubtext.textContent = 'Acoustic wavefront propagating...';
+            } else if (state.sonarDistance > 0) {
+                netStateText.textContent = 'ECHO DETECTED';
+                netStateText.className = 'status-display';
+                const unit = state.audioSonarActive ? 'cm' : 'grid units';
+                netSubtext.textContent = `Acoustic reflector at: ${state.sonarDistance} ${unit}`;
+            } else {
+                netStateText.textContent = 'SONAR IDLE';
+                netStateText.className = 'status-display';
+                netSubtext.textContent = 'Click Emitter Node or enable Mic/Spk to ping';
+            }
         } else {
             if (state.globalEnergy < 50) {
                 netStateText.textContent = 'CRITICAL ENERGY';

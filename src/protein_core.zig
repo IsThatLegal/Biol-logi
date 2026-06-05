@@ -304,10 +304,18 @@ test "Wave propagation timing" {
 
     sim.matrix[0].excitation = 100;
 
-    sim.tick(0);
+    // A simple mock writer that does nothing
+    const MockWriter = struct {
+        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) !void {
+            _ = self; _ = fmt; _ = args;
+        }
+    };
+    const mock_writer = MockWriter{};
+
+    try sim.tick(0, mock_writer);
     try std.testing.expect(sim.matrix[1].excitation > 0);
     
-    sim.tick(1);
+    try sim.tick(1, mock_writer);
     try std.testing.expect(sim.matrix[2].excitation > 0);
 }
 
